@@ -5258,3 +5258,105 @@ body.printing-reports #reports-document .settlement-accent-bold { font-weight: 7
 #reports-document.rpt-theme-print .settlement-accent-warning { color: #d97706 !important; }
 #reports-document.rpt-theme-print .settlement-accent-primary { color: #2563eb !important; }
 #reports-document.rpt-theme-print .settlement-accent-bold { font-weight: 700 !important; }
+
+/* =========================================================================
+   PAYOUTS — nowy UI wypłat
+   ========================================================================= */
+
+/* Karta pracownika */
+.payout-employee-card { position: relative; }
+.payout-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1rem; }
+.payout-card-subtitle { color: var(--text-secondary); font-size: 0.85rem; margin: 0; }
+.payout-card-summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 1rem; }
+.payout-summary-box { padding: 0.75rem 1rem; }
+.payout-summary-label { font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.3rem; }
+.payout-summary-value { font-size: 1.05rem; font-weight: 700; }
+.payout-summary-value--warning { color: var(--warning); }
+.payout-summary-value--success { color: var(--success); }
+.payout-summary-value--danger { color: var(--danger); }
+
+/* Config row */
+.payout-config-row { margin-bottom: 1rem; }
+.payout-choice-option { font-size: 0.88rem; }
+
+/* Section labels */
+.payout-section-label { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); }
+
+/* Historia wypłat */
+.payout-history-panel { margin-bottom: 1rem; border: 1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius: 0.6rem; overflow: hidden; }
+.payout-history-panel-summary { display: flex; justify-content: space-between; align-items: center; padding: 0.7rem 1rem; cursor: pointer; font-size: 0.9rem; font-weight: 600; background: var(--bg-glass); gap: 1rem; list-style: none; }
+.payout-history-panel-summary::-webkit-details-marker { display: none; }
+.payout-history-panel-summary::before { content: '▶'; font-size: 0.7rem; color: var(--text-secondary); margin-right: 0.4rem; transition: transform 0.2s; }
+details[open] > .payout-history-panel-summary::before { transform: rotate(90deg); }
+.payout-history-list { padding: 0.5rem 0; }
+
+/* Grupowanie typów */
+.payout-type-group { border-top: 1px solid var(--border-color, rgba(255,255,255,0.06)); }
+.payout-type-group-summary { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 1rem; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); list-style: none; }
+.payout-type-group-summary::-webkit-details-marker { display: none; }
+.payout-type-group-entries { padding: 0 0.5rem; }
+
+/* Pojedynczy wpis historii */
+.payout-history-entry { padding: 0.65rem 1rem; border-top: 1px solid var(--border-color, rgba(255,255,255,0.06)); }
+.payout-history-entry:first-child { border-top: none; }
+.payout-history-entry-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.35rem; }
+.payout-history-entry-meta { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.payout-history-entry-label { font-weight: 600; font-size: 0.88rem; }
+.payout-history-entry-date { font-size: 0.82rem; color: var(--text-secondary); }
+.payout-history-entry-payer { font-size: 0.8rem; color: var(--text-secondary); background: var(--bg-glass); padding: 0.1rem 0.45rem; border-radius: 0.25rem; }
+.payout-history-entry-amounts { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; font-size: 0.85rem; }
+.payout-history-entry-total { font-weight: 700; color: var(--success); }
+
+/* Archiwum zaliczek */
+.payout-archived-advances { margin-top: 0.4rem; padding: 0.5rem 0.75rem; background: var(--bg-glass); border-radius: 0.4rem; }
+.payout-archived-advance { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 0.25rem 0; font-size: 0.82rem; border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.05)); }
+.payout-archived-advance:last-child { border-bottom: none; }
+.payout-archived-advance--restored { opacity: 0.6; }
+.adv-date { color: var(--text-secondary); min-width: 5.5rem; }
+.adv-name { flex: 1; min-width: 6rem; }
+.adv-amount { font-weight: 600; color: var(--warning); }
+.adv-giver { font-size: 0.78rem; color: var(--text-secondary); }
+
+/* Zwroty zaliczek */
+.payout-refunds-section { margin-top: 0.4rem; padding: 0.5rem 0.75rem; background: rgba(239,68,68,0.06); border-radius: 0.4rem; border: 1px solid rgba(239,68,68,0.15); }
+.payout-refund-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.2rem 0; font-size: 0.83rem; flex-wrap: wrap; }
+.payout-refund-row--done { opacity: 0.6; }
+.payout-refund-row--pending { color: var(--warning); }
+.payout-refund-desc { flex: 1; }
+
+/* Sekcja zaliczek z checkboxami */
+.payout-advances-section { margin-bottom: 1rem; border: 1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius: 0.6rem; overflow: hidden; }
+.payout-advances-header { display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 1rem; background: var(--bg-glass); flex-wrap: wrap; gap: 0.5rem; }
+.payout-advances-header-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.payout-advances-list { padding: 0.4rem 0.75rem; max-height: 14rem; overflow-y: auto; }
+.payout-advance-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.3rem 0; font-size: 0.84rem; cursor: pointer; border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.05)); flex-wrap: wrap; }
+.payout-advance-row:last-child { border-bottom: none; }
+.payout-advance-row input[type="checkbox"] { flex-shrink: 0; accent-color: var(--primary, #6366f1); width: 1rem; height: 1rem; }
+.payout-advances-total { padding: 0.5rem 1rem; font-size: 0.85rem; background: var(--bg-glass); border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); }
+
+/* Formularz nowej wypłaty */
+.payout-form-section { padding: 1rem; background: var(--bg-glass); border-radius: 0.6rem; border: 1px solid var(--border-color, rgba(255,255,255,0.08)); }
+.payout-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; margin-bottom: 0.85rem; }
+.payout-form-summary { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.85rem; font-size: 0.88rem; padding: 0.6rem 0.75rem; background: var(--bg-secondary); border-radius: 0.4rem; }
+.payout-form-remaining-hint { margin-left: auto; color: var(--text-secondary); }
+.payout-form-buttons { display: flex; gap: 0.5rem; }
+
+/* Małe przyciski */
+.btn-xs { padding: 0.2rem 0.55rem !important; font-size: 0.75rem !important; }
+
+/* Sekcja wypłat w druku */
+.settlement-payout-section { margin-top: 0.75rem; }
+.settlement-payout-entry { display: flex; justify-content: space-between; align-items: center; font-size: 0.83rem; padding: 0.2rem 0; color: var(--text-secondary, #64748b); border-bottom: 1px solid rgba(0,0,0,0.06); }
+.settlement-payout-entry:last-child { border-bottom: none; }
+.settlement-payout-entry strong { color: var(--text-primary, #0f172a); }
+
+/* Responsive */
+@media (max-width: 650px) {
+  .payout-card-summary-grid { grid-template-columns: repeat(2, 1fr); }
+  .payout-form-grid { grid-template-columns: 1fr; }
+  .payout-history-entry-header { flex-direction: column; }
+  .payout-history-entry-amounts { justify-content: flex-start; }
+}
+@media (max-width: 420px) {
+  .payout-card-summary-grid { grid-template-columns: 1fr; }
+}
