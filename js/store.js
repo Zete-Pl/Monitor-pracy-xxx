@@ -180,28 +180,106 @@ const normalizePayoutDay = (value, fallback = 15) => {
   return Math.max(1, Math.min(31, parsed));
 };
 
-const normalizePayoutEmployeeRecord = (record = {}) => ({
-  includeCarryover: record.includeCarryover !== false,
-  deductAdvancesMode: ['none', 'default-day', 'custom-day'].includes(record.deductAdvancesMode)
-    ? record.deductAdvancesMode
-    : 'default-day',
-  customDeductionDate: /^\d{4}-\d{2}-\d{2}$/.test((record.customDeductionDate || '').toString().trim())
-    ? record.customDeductionDate.toString().trim()
-    : '',
-  sourceMonth: /^\d{4}-\d{2}$/.test((record.sourceMonth || '').toString().trim())
-    ? record.sourceMonth.toString().trim()
-    : '',
-  baseAmountSnapshot: Math.max(0, parseFloat(record.baseAmountSnapshot) || 0),
-  carryoverAmountSnapshot: Math.max(0, parseFloat(record.carryoverAmountSnapshot) || 0),
-  plannedAmountSnapshot: Math.max(0, parseFloat(record.plannedAmountSnapshot) || 0),
-  advanceDeductionAmountSnapshot: Math.max(0, parseFloat(record.advanceDeductionAmountSnapshot) || 0),
-  settledCashAmount: Math.max(0, parseFloat(record.settledCashAmount) || 0),
-  settledAdvanceAmount: Math.max(0, parseFloat(record.settledAdvanceAmount) || 0),
-  removedAdvanceExpenseIds: Array.isArray(record.removedAdvanceExpenseIds)
-    ? [...new Set(record.removedAdvanceExpenseIds.map(value => (value || '').toString().trim()).filter(Boolean))]
-    : [],
-  lastSettledAt: (record.lastSettledAt || '').toString().trim()
-});
+const normalizePayoutEntry = (entry = {}) => {
+  const deductedAdvances = Array.isArray(entry.deductedAdvances)
+    ? entry.deductedAdvances
+        .map(adv => ({
+          id: (adv.id || '').toString().trim(),
+          date: (adv.date || '').toString().trim(),
+          name: (adv.name || '').toString().trim(),
+          amount: Math.max(0, parseFloat(adv.amount) || 0),
+          paidById: (adv.paidById || '').toString().trim(),
+          restoredToCosts: adv.restoredToCosts === true,
+          restoredAt: (adv.restoredAt || '').toString().trim()
+        }))
+        .filter(adv => adv.id)
+    : [];
+  const advanceRefunds = Array.isArray(entry.advanceRefunds)
+    ? entry.advanceRefunds
+        .map(ref => ({
+          advanceId: (ref.advanceId || '').toString().trim(),
+          toPartnerId: (ref.toPartnerId || '').toString().trim(),
+          amount: Math.max(0, parseFloat(ref.amount) || 0),
+          returned: ref.returned === true,
+          returnedAt: (ref.returnedAt || '').toString().trim()
+        }))
+        .filter(ref => ref.advanceId && ref.toPartnerId)
+    : [];
+  return {
+    id: (entry.id || generateId()).toString().trim(),
+    type: ['monthly', 'weekly', 'custom'].includes(entry.type) ? entry.type : 'monthly',
+    label: (entry.label || '').toString().trim(),
+    payoutDate: /^\d{4}-\d{2}-\d{2}$/.test((entry.payoutDate || '').trim())
+      ? entry.payoutDate.trim() : '',
+    cashAmount: Math.max(0, parseFloat(entry.cashAmount) || 0),
+    paidByPartnerId: (entry.paidByPartnerId || '').toString().trim(),
+    deductedAdvances,
+    advanceRefunds,
+    createdAt: (entry.createdAt || '').toString().trim()
+  };
+};
+
+const normalizePayoutEmployeeRecord = (record = {}) => {
+  const rawPayouts = Array.isArray(record.payouts)
+    ? record.payouts.map(normalizePayoutEntry).filter(p => p.id)
+    : [];
+
+  // Migration: old-style data (no payouts array) → create synthetic entry
+  const payouts = rawPayouts.length === 0 && (
+    (parseFloat(record.settledCashAmount) || 0) > 0.005 ||
+    (parseFloat(record.settledAdvanceAmount) || 0) > 0.005
+  ) ? [normalizePayoutEntry({
+    id: 'legacy-migration',
+    type: 'monthly',
+    label: 'Wypłata (historyczna)',
+    payoutDate: (record.lastSettledAt || '').substring(0, 10),
+    cashAmount: Math.max(0, parseFloat(record.settledCashAmount) || 0),
+    paidByPartnerId: '',
+    deductedAdvances: (Array.isArray(record.removedAdvanceExpenseIds)
+      ? record.removedAdvanceExpenseIds.filter(Boolean).map(id => ({
+          id: id.toString().trim(),
+          date: '',
+          name: 'Zaliczka (historyczna)',
+          amount: 0,
+          paidById: '',
+          restoredToCosts: false,
+          restoredAt: ''
+        }))
+      : []),
+    advanceRefunds: [],
+    createdAt: record.lastSettledAt || ''
+  })] : rawPayouts;
+
+  // Derive legacy fields from payouts array (for backward compat with calculations)
+  const settledCashAmount = payouts.reduce((sum, p) => sum + p.cashAmount, 0);
+  const settledAdvanceAmount = payouts.reduce(
+    (sum, p) => sum + p.deductedAdvances.filter(a => !a.restoredToCosts).reduce((s, a) => s + a.amount, 0), 0
+  );
+  const removedAdvanceExpenseIds = [
+    ...new Set(payouts.flatMap(p => p.deductedAdvances.filter(a => !a.restoredToCosts).map(a => a.id)))
+  ];
+  const sorted = [...payouts].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  const lastSettledAt = sorted.length > 0 ? sorted[sorted.length - 1].createdAt : (record.lastSettledAt || '');
+
+  return {
+    includeCarryover: record.includeCarryover !== false,
+    deductAdvancesMode: ['none', 'default-day', 'custom-day'].includes(record.deductAdvancesMode)
+      ? record.deductAdvancesMode : 'default-day',
+    customDeductionDate: /^\d{4}-\d{2}-\d{2}$/.test((record.customDeductionDate || '').toString().trim())
+      ? record.customDeductionDate.toString().trim() : '',
+    sourceMonth: /^\d{4}-\d{2}$/.test((record.sourceMonth || '').toString().trim())
+      ? record.sourceMonth.toString().trim() : '',
+    baseAmountSnapshot: Math.max(0, parseFloat(record.baseAmountSnapshot) || 0),
+    carryoverAmountSnapshot: Math.max(0, parseFloat(record.carryoverAmountSnapshot) || 0),
+    plannedAmountSnapshot: Math.max(0, parseFloat(record.plannedAmountSnapshot) || 0),
+    advanceDeductionAmountSnapshot: Math.max(0, parseFloat(record.advanceDeductionAmountSnapshot) || 0),
+    payouts,
+    settledCashAmount,
+    settledAdvanceAmount,
+    removedAdvanceExpenseIds,
+    lastSettledAt
+  };
+};
 
 const normalizePayoutSettings = (settings = {}) => {
   const employees = Object.entries(settings.employees || {}).reduce((acc, [personId, employeeRecord]) => {
@@ -3678,36 +3756,152 @@ const Store = {
     const ms = ensureMonthSettings(month);
     const existingRecord = normalizePayoutEmployeeRecord(ms.payouts?.employees?.[normalizedPersonId] || {});
     const monthRecord = appState.months[month] || (appState.months[month] = normalizeMonth(null));
+
     const selectedAdvanceExpenseIds = Array.isArray(settlement.advanceExpenseIds)
-      ? [...new Set(settlement.advanceExpenseIds.map(value => (value || '').toString().trim()).filter(Boolean))]
+      ? [...new Set(settlement.advanceExpenseIds.map(v => (v || '').toString().trim()).filter(Boolean))]
       : [];
     const alreadyRemovedIds = new Set(existingRecord.removedAdvanceExpenseIds || []);
-    const removableExpenses = (monthRecord.expenses || []).filter(expense => expense?.type === 'ADVANCE' && selectedAdvanceExpenseIds.includes(expense.id));
-    const removableExpenseIds = removableExpenses
-      .map(expense => expense.id)
-      .filter(expenseId => !alreadyRemovedIds.has(expenseId));
-    const removedAdvanceAmount = removableExpenses
-      .filter(expense => removableExpenseIds.includes(expense.id))
-      .reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
-    const settledCashAmount = Math.max(0, parseFloat(settlement.cashAmount) || 0);
 
-    if (removableExpenseIds.length > 0) {
-      monthRecord.expenses = (monthRecord.expenses || []).filter(expense => !removableExpenseIds.includes(expense.id));
+    // Advances to deduct — archive them before deletion
+    const advancesToDeduct = (monthRecord.expenses || []).filter(expense =>
+      expense?.type === 'ADVANCE' &&
+      selectedAdvanceExpenseIds.includes(expense.id) &&
+      !alreadyRemovedIds.has(expense.id)
+    );
+
+    const paidByPartnerId = (settlement.paidByPartnerId || '').toString().trim();
+
+    const deductedAdvances = advancesToDeduct.map(expense => ({
+      id: expense.id,
+      date: expense.date || '',
+      name: expense.name || '',
+      amount: Math.max(0, parseFloat(expense.amount) || 0),
+      paidById: expense.paidById || '',
+      restoredToCosts: false,
+      restoredAt: ''
+    }));
+
+    // Refund obligations: if payer is set and differs from the advance giver
+    const advanceRefunds = deductedAdvances
+      .filter(adv => adv.paidById && paidByPartnerId && adv.paidById !== paidByPartnerId)
+      .map(adv => ({
+        advanceId: adv.id,
+        toPartnerId: adv.paidById,
+        amount: adv.amount,
+        returned: false,
+        returnedAt: ''
+      }));
+
+    // Remove deducted advances from expenses
+    const deductedIds = new Set(advancesToDeduct.map(e => e.id));
+    if (deductedIds.size > 0) {
+      monthRecord.expenses = (monthRecord.expenses || []).filter(e => !deductedIds.has(e.id));
     }
+
+    const cashAmount = Math.max(0, parseFloat(settlement.cashAmount) || 0);
+
+    const payoutEntry = normalizePayoutEntry({
+      id: generateId(),
+      type: settlement.payoutType || 'monthly',
+      label: settlement.payoutLabel || '',
+      payoutDate: settlement.payoutDate || '',
+      cashAmount,
+      paidByPartnerId,
+      deductedAdvances,
+      advanceRefunds,
+      createdAt: new Date().toISOString()
+    });
+
+    // Set snapshots only on first payout
+    const isFirstPayout = existingRecord.payouts.length === 0;
+    const updatedRecord = normalizePayoutEmployeeRecord({
+      ...existingRecord,
+      payouts: [...existingRecord.payouts, payoutEntry],
+      sourceMonth: settlement.sourceMonth || existingRecord.sourceMonth || '',
+      baseAmountSnapshot: isFirstPayout
+        ? Math.max(0, parseFloat(settlement.baseAmountSnapshot) || 0)
+        : existingRecord.baseAmountSnapshot,
+      carryoverAmountSnapshot: isFirstPayout
+        ? Math.max(0, parseFloat(settlement.carryoverAmountSnapshot) || 0)
+        : existingRecord.carryoverAmountSnapshot,
+      plannedAmountSnapshot: isFirstPayout
+        ? Math.max(0, parseFloat(settlement.plannedAmountSnapshot) || 0)
+        : existingRecord.plannedAmountSnapshot
+    });
 
     ms.payouts = normalizePayoutSettings({
       ...(ms.payouts || {}),
-      employees: {
-        ...(ms.payouts?.employees || {}),
-        [normalizedPersonId]: {
-          ...existingRecord,
-          ...settlement,
-          settledCashAmount: existingRecord.settledCashAmount + settledCashAmount,
-          settledAdvanceAmount: existingRecord.settledAdvanceAmount + removedAdvanceAmount,
-          removedAdvanceExpenseIds: [...existingRecord.removedAdvanceExpenseIds, ...removableExpenseIds],
-          lastSettledAt: new Date().toISOString()
-        }
-      }
+      employees: { ...(ms.payouts?.employees || {}), [normalizedPersonId]: updatedRecord }
+    });
+    Store.save(month);
+    return true;
+  },
+
+  restoreAdvanceToCosts: (personId, payoutEntryId, advanceId, month = Store.getSelectedMonth()) => {
+    const normalizedPersonId = (personId || '').toString().trim();
+    if (!canMutateMonth(month) || !normalizedPersonId) return false;
+
+    const ms = ensureMonthSettings(month);
+    const existingRecord = normalizePayoutEmployeeRecord(ms.payouts?.employees?.[normalizedPersonId] || {});
+    const monthRecord = appState.months[month] || (appState.months[month] = normalizeMonth(null));
+
+    const payoutIndex = existingRecord.payouts.findIndex(p => p.id === payoutEntryId);
+    if (payoutIndex === -1) return false;
+
+    const entry = existingRecord.payouts[payoutIndex];
+    const advIndex = entry.deductedAdvances.findIndex(a => a.id === advanceId && !a.restoredToCosts);
+    if (advIndex === -1) return false;
+
+    const adv = entry.deductedAdvances[advIndex];
+    // Re-add as a COST expense
+    monthRecord.expenses.push(normalizeExpenseRecord({
+      id: generateId(),
+      type: 'COST',
+      date: adv.date || `${month}-01`,
+      name: `[z zaliczki] ${adv.name}`.trim(),
+      amount: adv.amount,
+      paidById: adv.paidById
+    }));
+
+    const updatedAdvances = [...entry.deductedAdvances];
+    updatedAdvances[advIndex] = { ...adv, restoredToCosts: true, restoredAt: new Date().toISOString() };
+
+    const updatedPayouts = [...existingRecord.payouts];
+    updatedPayouts[payoutIndex] = { ...entry, deductedAdvances: updatedAdvances };
+
+    const updatedRecord = normalizePayoutEmployeeRecord({ ...existingRecord, payouts: updatedPayouts });
+    ms.payouts = normalizePayoutSettings({
+      ...(ms.payouts || {}),
+      employees: { ...(ms.payouts?.employees || {}), [normalizedPersonId]: updatedRecord }
+    });
+    Store.save(month);
+    return true;
+  },
+
+  markAdvanceRefundReturned: (personId, payoutEntryId, advanceId, month = Store.getSelectedMonth()) => {
+    const normalizedPersonId = (personId || '').toString().trim();
+    if (!canMutateMonth(month) || !normalizedPersonId) return false;
+
+    const ms = ensureMonthSettings(month);
+    const existingRecord = normalizePayoutEmployeeRecord(ms.payouts?.employees?.[normalizedPersonId] || {});
+
+    const payoutIndex = existingRecord.payouts.findIndex(p => p.id === payoutEntryId);
+    if (payoutIndex === -1) return false;
+
+    const entry = existingRecord.payouts[payoutIndex];
+    const refundIndex = entry.advanceRefunds.findIndex(r => r.advanceId === advanceId && !r.returned);
+    if (refundIndex === -1) return false;
+
+    const updatedRefunds = [...entry.advanceRefunds];
+    updatedRefunds[refundIndex] = { ...updatedRefunds[refundIndex], returned: true, returnedAt: new Date().toISOString() };
+
+    const updatedPayouts = [...existingRecord.payouts];
+    updatedPayouts[payoutIndex] = { ...entry, advanceRefunds: updatedRefunds };
+
+    const updatedRecord = normalizePayoutEmployeeRecord({ ...existingRecord, payouts: updatedPayouts });
+    ms.payouts = normalizePayoutSettings({
+      ...(ms.payouts || {}),
+      employees: { ...(ms.payouts?.employees || {}), [normalizedPersonId]: updatedRecord }
     });
     Store.save(month);
     return true;

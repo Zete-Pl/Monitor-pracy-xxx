@@ -150,6 +150,8 @@ const Calculations = {
     const previousMonth = Calculations.getPreviousMonthKey(payoutMonth);
     const payoutSettings = Calculations.getPayoutSettings(state, payoutMonth);
     const currentPayoutDate = Calculations.getPayoutDefaultDate(payoutMonth, payoutSettings.defaultDay);
+    const [pyear, pmonthNum] = payoutMonth.split('-').map(Number);
+    const lastDayOfPayoutMonth = `${payoutMonth}-${String(new Date(pyear, pmonthNum, 0).getDate()).padStart(2, '0')}`;
     const previousMonthSettlement = previousMonth
       ? Calculations.generateSettlement({ ...state, selectedMonth: previousMonth }, { includeInvoiceTaxEqualization: false, includeInvoiceReconciliation: false })
       : { employees: [] };
@@ -163,9 +165,15 @@ const Calculations = {
         .map(expense => expense.advanceForId))
     ]);
 
+    // Partners list for the payer selector
+    const allPersons = state?.common?.persons || state?.persons || [];
+    const partners = allPersons
+      .filter(p => (p.type === 'PARTNER' || p.type === 'WORKING_PARTNER') && p.isActive !== false)
+      .sort((a, b) => Calculations.getPersonDisplayName(a).localeCompare(Calculations.getPersonDisplayName(b), 'pl-PL'));
+
     const employees = [...employeeIds]
       .map(personId => {
-        const person = (state?.common?.persons || state?.persons || []).find(candidate => candidate.id === personId && candidate.type === 'EMPLOYEE');
+        const person = allPersons.find(candidate => candidate.id === personId && candidate.type === 'EMPLOYEE');
         if (!person) return null;
 
         const payoutRecord = payoutSettings.employees?.[personId] || {
@@ -178,7 +186,8 @@ const Calculations = {
           baseAmountSnapshot: 0,
           carryoverAmountSnapshot: 0,
           advanceDeductionAmountSnapshot: 0,
-          removedAdvanceExpenseIds: []
+          removedAdvanceExpenseIds: [],
+          payouts: []
         };
         const baseAmount = Math.max(0, parseFloat(previousMonthEmployeeMap?.[personId]?.toPayout) || 0);
         const carryoverAmount = Calculations.getEmployeeUnresolvedPayoutTotal(state, payoutMonth, personId);
@@ -194,12 +203,32 @@ const Calculations = {
           : (payoutRecord.deductAdvancesMode === 'custom-day' && payoutRecord.customDeductionDate
               ? payoutRecord.customDeductionDate
               : currentPayoutDate);
-        const advanceData = Calculations.getEmployeePayoutAdvances(state, payoutMonth, personId, deductionDate);
+
+        // All available advances (not yet removed), sorted by date
+        const removedIds = new Set(payoutRecord.removedAdvanceExpenseIds || []);
+        const allAdvancesForMonth = Calculations.getEmployeePayoutAdvances(
+          state, payoutMonth, personId, lastDayOfPayoutMonth
+        ).expenses.filter(e => !removedIds.has(e.id));
+
+        // Default-checked advances based on deductAdvancesMode
+        const defaultCheckedIds = new Set(
+          payoutRecord.deductAdvancesMode === 'none'
+            ? []
+            : allAdvancesForMonth
+                .filter(e => !deductionDate || e.date <= deductionDate)
+                .map(e => e.id)
+        );
+
         const settledAmount = Math.max(0, parseFloat(payoutRecord.settledCashAmount) || 0) + Math.max(0, parseFloat(payoutRecord.settledAdvanceAmount) || 0);
         const remainingAmount = Math.max(0, plannedAmount - settledAmount);
+
+        // Auto-selected advances (for default payout amount hint)
         const selectableAdvanceData = payoutRecord.deductAdvancesMode === 'none'
           ? { amount: 0, expenses: [] }
-          : Calculations.selectAdvanceExpensesForPayout(advanceData.expenses, remainingAmount);
+          : Calculations.selectAdvanceExpensesForPayout(
+              allAdvancesForMonth.filter(e => !deductionDate || e.date <= deductionDate),
+              remainingAmount
+            );
         const availableAdvanceAmount = selectableAdvanceData.amount;
 
         return {
@@ -218,13 +247,15 @@ const Calculations = {
           deductionDate,
           availableAdvanceAmount,
           availableAdvanceExpenses: selectableAdvanceData.expenses,
-          totalAdvanceAmountToDate: advanceData.amount,
+          allAvailableAdvanceExpenses: allAdvancesForMonth,
+          defaultCheckedAdvanceIds: defaultCheckedIds,
+          totalAdvanceAmountToDate: allAdvancesForMonth.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0),
           payoutRecord,
           payoutNowAmount: Math.max(0, remainingAmount - availableAdvanceAmount)
         };
       })
       .filter(Boolean)
-      .filter(item => item.baseAmount > 0 || item.carryoverAmount > 0 || item.remainingAmount > 0 || item.availableAdvanceAmount > 0)
+      .filter(item => item.baseAmount > 0 || item.carryoverAmount > 0 || item.remainingAmount > 0 || item.availableAdvanceAmount > 0 || item.allAvailableAdvanceExpenses.length > 0)
       .sort((left, right) => Calculations.getPersonDisplayName(left.person).localeCompare(Calculations.getPersonDisplayName(right.person), 'pl-PL'));
 
     return {
@@ -233,6 +264,7 @@ const Calculations = {
       defaultDay: payoutSettings.defaultDay,
       payoutDate: currentPayoutDate,
       employees,
+      partners,
       totalBaseAmount: employees.reduce((sum, item) => sum + item.baseAmount, 0),
       totalCarryoverAmount: employees.reduce((sum, item) => sum + item.carryoverAmount, 0),
       totalRemainingAmount: employees.reduce((sum, item) => sum + item.remainingAmount, 0)
