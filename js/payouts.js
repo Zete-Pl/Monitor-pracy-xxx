@@ -274,13 +274,24 @@ function buildPayoutEmployeeCardHtml(item = {}, data = {}) {
           <div class="payout-summary-label">Pensja z poprzedniego miesiąca</div>
           <div class="payout-summary-value">${escapeReportHtml(formatSettlementCompactCurrency(item.baseAmount || 0))}</div>
         </div>
+        ${(item.carryoverAmount || 0) > 0.005 ? `
         <div class="glass-panel payout-summary-box">
           <div class="payout-summary-label">Nierozliczone wypłaty</div>
           <div class="payout-summary-value payout-summary-value--warning">${escapeReportHtml(formatSettlementCompactCurrency(item.carryoverAmount || 0))}</div>
-        </div>
+        </div>` : ''}
+        ${(item.currentMonthAmount || 0) > 0.005 ? `
+        <div class="glass-panel payout-summary-box">
+          <div class="payout-summary-label">Bieżący miesiąc</div>
+          <div class="payout-summary-value">${escapeReportHtml(formatSettlementCompactCurrency(item.currentMonthAmount || 0))}</div>
+        </div>` : ''}
+        ${(item.settledAmount || 0) > 0.005 ? `
+        <div class="glass-panel payout-summary-box">
+          <div class="payout-summary-label">Łącznie wypłacono</div>
+          <div class="payout-summary-value payout-summary-value--success">${escapeReportHtml(formatSettlementCompactCurrency(item.settledAmount || 0))}</div>
+        </div>` : ''}
         <div class="glass-panel payout-summary-box">
           <div class="payout-summary-label">Pozostało do rozliczenia</div>
-          <div class="payout-summary-value payout-summary-value--success">${escapeReportHtml(formatSettlementCompactCurrency(item.remainingAmount || 0))}</div>
+          <div class="payout-summary-value ${(item.remainingAmount || 0) <= 0.005 ? 'payout-summary-value--success' : 'payout-summary-value--warning'}">${escapeReportHtml(formatSettlementCompactCurrency(item.remainingAmount || 0))}</div>
         </div>
       </div>
 
@@ -288,6 +299,10 @@ function buildPayoutEmployeeCardHtml(item = {}, data = {}) {
         <label class="choice-option payout-choice-option">
           <input type="checkbox" class="payout-include-carryover-toggle" ${item.payoutRecord?.includeCarryover !== false ? 'checked' : ''}>
           <span class="choice-option-text">Dolicz nierozliczone wypłaty z poprzednich miesięcy</span>
+        </label>
+        <label class="choice-option payout-choice-option">
+          <input type="checkbox" class="payout-include-current-month-toggle" ${item.includeCurrentMonth ? 'checked' : ''}>
+          <span class="choice-option-text">Dolicz wypłatę za bieżący miesiąc (tygodniówki)</span>
         </label>
       </div>
 
@@ -412,6 +427,11 @@ function initPayouts() {
 
     if (event.target.classList.contains('payout-include-carryover-toggle')) {
       Store.updatePayoutEmployeeConfig?.(personId, { includeCarryover: event.target.checked }, getSelectedMonthKey());
+      return;
+    }
+
+    if (event.target.classList.contains('payout-include-current-month-toggle')) {
+      Store.updatePayoutEmployeeConfig?.(personId, { includeCurrentMonth: event.target.checked }, getSelectedMonthKey());
       return;
     }
 

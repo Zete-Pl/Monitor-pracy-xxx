@@ -9584,13 +9584,10 @@ function buildSettlementProfitBreakdownSectionHtml(res, taxDetailsHtml = '') {
 
 function buildSettlementEmployeePayoutsHtml(personId, state, payoutMonth) {
   try {
-    const payoutSettings = Calculations.getPayoutSettings(state, payoutMonth);
-    const record = payoutSettings?.employees?.[personId];
+    const payoutsData = Calculations.calculatePayoutsData(state, payoutMonth);
+    const item = (payoutsData?.employees || []).find(e => e?.person?.id === personId);
+    const record = item?.payoutRecord;
     if (!record || !Array.isArray(record.payouts) || record.payouts.length === 0) return '';
-
-    const totalCash = record.payouts.reduce((s, p) => s + (p.cashAmount || 0), 0);
-    const totalAdv = record.payouts.reduce((s, p) => s + p.deductedAdvances.filter(a => !a.restoredToCosts).reduce((ss, a) => ss + a.amount, 0), 0);
-    const total = totalCash + totalAdv;
 
     const allPersons = state?.common?.persons || state?.persons || [];
     const entriesHtml = record.payouts.map(p => {
@@ -9607,12 +9604,26 @@ function buildSettlementEmployeePayoutsHtml(personId, state, payoutMonth) {
       </div>`;
     }).join('');
 
+    const settledAmount = item?.settledAmount || 0;
+    const plannedAmount = item?.plannedAmount || 0;
+    const remainingAmount = Math.max(0, item?.remainingAmount || 0);
+
+    const summaryHtml = plannedAmount > 0.005 ? `
+      <div class="settlement-payout-summary">
+        <span>Planowana: <strong>${formatSettlementCurrency(plannedAmount)}</strong></span>
+        <span>Wypłacono: <strong>${formatSettlementCurrency(settledAmount)}</strong></span>
+        ${remainingAmount > 0.005
+          ? `<span style="color:var(--warning-color,#e67e22);">Pozostało: <strong>${formatSettlementCurrency(remainingAmount)}</strong></span>`
+          : `<span style="color:var(--success-color,#27ae60);">Rozliczono w całości</span>`}
+      </div>` : '';
+
     return `
       <div class="settlement-detail-item settlement-payout-section">
         <div class="settlement-detail-item-header">
           <div><h4>Wypłaty w tym miesiącu</h4></div>
-          <strong>${formatSettlementCurrency(total)}</strong>
+          <strong>${formatSettlementCurrency(settledAmount)}</strong>
         </div>
+        ${summaryHtml}
         <div>${entriesHtml}</div>
       </div>`;
   } catch (e) {
