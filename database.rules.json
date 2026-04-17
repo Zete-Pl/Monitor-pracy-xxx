@@ -1,0 +1,31 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "shared_data": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "shared_meta": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "shared_history": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "shared_backups_daily": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "shared_backups_monthly": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "force_resync_control": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}

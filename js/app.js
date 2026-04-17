@@ -1,17 +1,10 @@
 console.log("MONITOR PRACY APP.JS V3 - LOADED");
-// Firebase Configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyAER1cBnWBVFjyMiEcZTKwgt8f-EgvNEVA",
-  authDomain: "monitor-pracy-a9440.firebaseapp.com",
-  databaseURL: "https://monitor-pracy-a9440-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "monitor-pracy-a9440",
-  storageBucket: "monitor-pracy-a9440.firebasestorage.app",
-  messagingSenderId: "751538429834",
-  appId: "1:751538429834:web:a20261f25896fca8727273"
-};
 
 if (typeof firebase !== 'undefined' && !firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
+  if (!window.firebaseConfig) {
+    throw new Error("Brak firebase-config.js! Skopiuj js/firebase-config.example.js jako js/firebase-config.js i uzupełnij klucze.");
+  }
+  firebase.initializeApp(window.firebaseConfig);
 }
 
 function appIsFirebasePermissionDeniedError(error) {
@@ -832,7 +825,7 @@ function rebuildLocalDatabaseFromSharedData(sharedData = {}, options = {}) {
 
       return Promise.all(followUpTasks).then(() => {
         if (markForceResyncCompleted) {
-          console.log('firebase: Wykonano force_resync dla użytkownika:', userEmail);
+          console.log('firebase: Wykonano force_resync');
         }
 
         if (typeof onAfterRebuild === 'function') {
@@ -12432,14 +12425,21 @@ function populateWorksSheetClientSelect(selectedClient = '') {
   clientSelect.innerHTML = '<option value="">-- Wybierz klienta --</option>';
 
   activeClients.forEach(client => {
-    const selected = client.name === selectedClient ? 'selected' : '';
-    clientSelect.innerHTML += `<option value="${client.name}" ${selected}>${client.name}</option>`;
+    const opt = document.createElement('option');
+    opt.value = client.name;
+    opt.textContent = client.name;
+    opt.selected = client.name === selectedClient;
+    clientSelect.appendChild(opt);
   });
 
   if (selectedClient && !activeClients.some(client => client.name === selectedClient)) {
     const currentClient = Store.getState().clients.find(client => client.name === selectedClient);
     if (currentClient) {
-      clientSelect.innerHTML += `<option value="${currentClient.name}" selected>${currentClient.name} - nieaktywny</option>`;
+      const opt = document.createElement('option');
+      opt.value = currentClient.name;
+      opt.textContent = `${currentClient.name} - nieaktywny`;
+      opt.selected = true;
+      clientSelect.appendChild(opt);
     }
   }
 }
@@ -13021,7 +13021,10 @@ function renderWorksSheetDetail(sheetId) {
   const workSelect = document.getElementById('works-entry-work');
   workSelect.innerHTML = '<option value="">-- Wybierz z katalogu --</option>';
   Store.getState().worksCatalog.forEach(w => {
-    workSelect.innerHTML += `<option value="${w.id}">${w.name} (${w.unit})</option>`;
+    const opt = document.createElement('option');
+    opt.value = w.id;
+    opt.textContent = `${w.name} (${w.unit})`;
+    workSelect.appendChild(opt);
   });
   
   const tbody = document.getElementById('works-entries-body');
@@ -14078,34 +14081,43 @@ function initFirebaseAuth() {
 
   const loginForm = document.getElementById('firebase-login-form');
   if (loginForm) {
+    const _loginRateLimit = { attempts: 0, lockedUntil: 0 };
     loginForm.onsubmit = (e) => {
       e.preventDefault();
+      const now = Date.now();
+      if (_loginRateLimit.lockedUntil > now) {
+        const secs = Math.ceil((_loginRateLimit.lockedUntil - now) / 1000);
+        const m = `Zbyt wiele prób logowania. Poczekaj ${secs} sekund.`;
+        if (errorMsg) { errorMsg.textContent = m; errorMsg.style.display = 'block'; }
+        return false;
+      }
+
       const email = emailInput?.value?.trim() || '';
       const password = passwordInput?.value || '';
-      
-      console.log("Attempting login for:", email);
-      
+
       if (!email || !password) {
         const m = 'Wprowadź e-mail i hasło.';
-        alert(m);
         if (errorMsg) { errorMsg.textContent = m; errorMsg.style.display = 'block'; }
         return false;
       }
 
       setAuthLoadingState(true, 'Trwa Logowanie....');
-      
+
       auth.signInWithEmailAndPassword(email, password)
         .then(() => {
-          console.log("Login successful!");
+          _loginRateLimit.attempts = 0;
         })
         .catch(err => {
           setAuthLoadingState(false);
-          console.error("Firebase Login Error:", err);
-          let userFriendlyMsg = 'Błąd logowania: ' + err.message;
+          _loginRateLimit.attempts += 1;
+          if (_loginRateLimit.attempts >= 5) {
+            _loginRateLimit.lockedUntil = Date.now() + 60_000;
+            _loginRateLimit.attempts = 0;
+          }
+          let userFriendlyMsg = 'Błąd logowania. Sprawdź e-mail i hasło.';
           if (err.code === 'auth/user-not-found') userFriendlyMsg = 'Nie znaleziono użytkownika o tym adresie e-mail.';
           if (err.code === 'auth/wrong-password') userFriendlyMsg = 'Błędne hasło.';
-          
-          alert(userFriendlyMsg);
+          if (err.code === 'auth/too-many-requests') userFriendlyMsg = 'Zbyt wiele nieudanych prób. Spróbuj ponownie później.';
           if (errorMsg) {
             errorMsg.textContent = userFriendlyMsg;
             errorMsg.style.display = 'block';
@@ -14122,8 +14134,8 @@ function initFirebaseAuth() {
       const provider = new firebase.auth.GoogleAuthProvider();
       auth.signInWithPopup(provider).catch(err => {
         setAuthLoadingState(false);
-        console.error("Firebase Google Error:", err);
-        alert('Błąd Google: ' + err.message);
+        const userFriendlyMsg = err.code === 'auth/popup-closed-by-user' ? 'Okno logowania zostało zamknięte.' : 'Błąd logowania przez Google. Spróbuj ponownie.';
+        if (errorMsg) { errorMsg.textContent = userFriendlyMsg; errorMsg.style.display = 'block'; }
         if (errorMsg) {
           errorMsg.textContent = 'Błąd Google: ' + err.message;
           errorMsg.style.display = 'block';
