@@ -11,3 +11,7 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+node_modules/
+package-lock.json
+test-results/
+playwright-report/
