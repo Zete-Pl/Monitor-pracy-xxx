@@ -13729,7 +13729,7 @@ function initFirebaseAuth() {
       const userEmail = (user.email || '').toLowerCase().trim();
       const isAuthorized = AUTHORIZED_EMAILS.includes(userEmail);
       
-      console.log("Użytkownik zalogowany:", userEmail, "Autoryzacja:", isAuthorized);
+      console.log("Użytkownik zalogowany. Autoryzacja:", isAuthorized);
 
       if (!isAuthorized) {
         if (overlay) {

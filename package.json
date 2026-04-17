@@ -1,0 +1,13 @@
+{
+  "name": "monitor-pracy",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers playwright test",
+    "test:headed": "PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers playwright test --headed",
+    "test:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.59.1"
+  }
+}
