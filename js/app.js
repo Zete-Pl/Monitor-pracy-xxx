@@ -1,17 +1,10 @@
 console.log("MONITOR PRACY APP.JS V3 - LOADED");
-// Firebase Configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyAER1cBnWBVFjyMiEcZTKwgt8f-EgvNEVA",
-  authDomain: "monitor-pracy-a9440.firebaseapp.com",
-  databaseURL: "https://monitor-pracy-a9440-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "monitor-pracy-a9440",
-  storageBucket: "monitor-pracy-a9440.firebasestorage.app",
-  messagingSenderId: "751538429834",
-  appId: "1:751538429834:web:a20261f25896fca8727273"
-};
 
 if (typeof firebase !== 'undefined' && !firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
+  if (!window.firebaseConfig) {
+    throw new Error("Brak firebase-config.js! Skopiuj js/firebase-config.example.js jako js/firebase-config.js i uzupełnij klucze.");
+  }
+  firebase.initializeApp(window.firebaseConfig);
 }
 
 function appIsFirebasePermissionDeniedError(error) {

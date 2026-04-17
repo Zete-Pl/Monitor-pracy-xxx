@@ -1,0 +1,13 @@
+# Firebase config (real keys - never commit)
+.env
+js/firebase-config.js
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
