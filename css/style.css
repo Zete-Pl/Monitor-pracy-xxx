@@ -5276,7 +5276,7 @@ body.printing-reports #reports-document .settlement-accent-bold { font-weight: 7
 .payout-summary-value--danger { color: var(--danger); }
 
 /* Config row */
-.payout-config-row { margin-bottom: 1rem; }
+.payout-config-row { margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; }
 .payout-choice-option { font-size: 0.88rem; }
 
 /* Section labels */
@@ -5346,6 +5346,8 @@ details[open] > .payout-history-panel-summary::before { transform: rotate(90deg)
 
 /* Sekcja wypłat w druku */
 .settlement-payout-section { margin-top: 0.75rem; }
+.settlement-payout-summary { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; font-size: 0.82rem; padding: 0.4rem 0; color: var(--text-secondary, #64748b); margin-bottom: 0.25rem; }
+.settlement-payout-summary strong { color: var(--text-primary, #0f172a); }
 .settlement-payout-entry { display: flex; justify-content: space-between; align-items: center; font-size: 0.83rem; padding: 0.2rem 0; color: var(--text-secondary, #64748b); border-bottom: 1px solid rgba(0,0,0,0.06); }
 .settlement-payout-entry:last-child { border-bottom: none; }
 .settlement-payout-entry strong { color: var(--text-primary, #0f172a); }

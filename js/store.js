@@ -273,6 +273,7 @@ const normalizePayoutEmployeeRecord = (record = {}) => {
     carryoverAmountSnapshot: Math.max(0, parseFloat(record.carryoverAmountSnapshot) || 0),
     plannedAmountSnapshot: Math.max(0, parseFloat(record.plannedAmountSnapshot) || 0),
     advanceDeductionAmountSnapshot: Math.max(0, parseFloat(record.advanceDeductionAmountSnapshot) || 0),
+    includeCurrentMonth: record.includeCurrentMonth === true,
     payouts,
     settledCashAmount,
     settledAdvanceAmount,

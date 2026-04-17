@@ -64,6 +64,7 @@ const Calculations = {
         if (!normalizedPersonId) return acc;
         acc[normalizedPersonId] = {
           includeCarryover: record?.includeCarryover !== false,
+          includeCurrentMonth: record?.includeCurrentMonth === true,
           deductAdvancesMode: ['none', 'default-day', 'custom-day'].includes(record?.deductAdvancesMode)
             ? record.deductAdvancesMode
             : 'default-day',
@@ -82,7 +83,8 @@ const Calculations = {
           removedAdvanceExpenseIds: Array.isArray(record?.removedAdvanceExpenseIds)
             ? [...new Set(record.removedAdvanceExpenseIds.map(value => (value || '').toString().trim()).filter(Boolean))]
             : [],
-          lastSettledAt: (record?.lastSettledAt || '').toString().trim()
+          lastSettledAt: (record?.lastSettledAt || '').toString().trim(),
+          payouts: Array.isArray(record?.payouts) ? record.payouts : []
         };
         return acc;
       }, {})
@@ -100,16 +102,49 @@ const Calculations = {
   getEmployeeUnresolvedPayoutTotal: (state, payoutMonth = '', personId = '') => {
     if (!payoutMonth || !personId) return 0;
 
+    // Cache settlements computed during this call to avoid redundant work
+    const settlementCache = {};
+    const getOrComputeSettlement = (sMonth) => {
+      if (!sMonth || !state?.months?.[sMonth]) return null;
+      if (!settlementCache[sMonth]) {
+        try {
+          settlementCache[sMonth] = Calculations.generateSettlement(
+            { ...state, selectedMonth: sMonth },
+            { includeInvoiceTaxEqualization: false, includeInvoiceReconciliation: false }
+          );
+        } catch (e) {
+          settlementCache[sMonth] = null;
+        }
+      }
+      return settlementCache[sMonth];
+    };
+
     return Object.keys(state?.months || {})
       .filter(monthKey => /^\d{4}-\d{2}$/.test(monthKey) && monthKey < payoutMonth)
       .reduce((sum, monthKey) => {
         const record = Calculations.getPayoutSettings({ ...state, selectedMonth: monthKey }, monthKey)?.employees?.[personId];
-        if (!record) return sum;
+        const settledAmount = record
+          ? (Math.max(0, parseFloat(record.settledCashAmount) || 0) + Math.max(0, parseFloat(record.settledAdvanceAmount) || 0))
+          : 0;
 
-        const plannedAmount = Math.max(0, parseFloat(record.plannedAmountSnapshot) || 0);
-        const settledAmount = Math.max(0, parseFloat(record.settledCashAmount) || 0) + Math.max(0, parseFloat(record.settledAdvanceAmount) || 0);
-        const remainingAmount = Math.max(0, plannedAmount - settledAmount);
-        return sum + remainingAmount;
+        // Skip if this month's carryover is explicitly disabled
+        if (record?.includeCarryover === false) return sum;
+
+        let plannedAmount;
+        if (record && (parseFloat(record.plannedAmountSnapshot) || 0) > 0.005) {
+          // Use locked-in snapshot (settlement was started for this month)
+          plannedAmount = Math.max(0, parseFloat(record.plannedAmountSnapshot));
+        } else {
+          // Dynamically compute: salary for payout month M comes from settlement of month M-1
+          const salarySourceMonth = Calculations.getPreviousMonthKey(monthKey);
+          if (!salarySourceMonth) return sum;
+          const settlement = getOrComputeSettlement(salarySourceMonth);
+          if (!settlement) return sum;
+          const empEntry = (settlement.employees || []).find(e => e?.person?.id === personId);
+          plannedAmount = Math.max(0, parseFloat(empEntry?.toPayout) || 0);
+        }
+
+        return sum + Math.max(0, plannedAmount - settledAmount);
       }, 0);
   },
 
@@ -171,6 +206,9 @@ const Calculations = {
       .filter(p => (p.type === 'PARTNER' || p.type === 'WORKING_PARTNER') && p.isActive !== false)
       .sort((a, b) => Calculations.getPersonDisplayName(a).localeCompare(Calculations.getPersonDisplayName(b), 'pl-PL'));
 
+    // Lazily computed current-month settlement (shared across employees)
+    let currentMonthSettlement = null;
+
     const employees = [...employeeIds]
       .map(personId => {
         const person = allPersons.find(candidate => candidate.id === personId && candidate.type === 'EMPLOYEE');
@@ -178,6 +216,7 @@ const Calculations = {
 
         const payoutRecord = payoutSettings.employees?.[personId] || {
           includeCarryover: true,
+          includeCurrentMonth: false,
           deductAdvancesMode: 'default-day',
           customDeductionDate: '',
           settledCashAmount: 0,
@@ -191,9 +230,27 @@ const Calculations = {
         };
         const baseAmount = Math.max(0, parseFloat(previousMonthEmployeeMap?.[personId]?.toPayout) || 0);
         const carryoverAmount = Calculations.getEmployeeUnresolvedPayoutTotal(state, payoutMonth, personId);
-        const plannedAmount = payoutRecord.plannedAmountSnapshot > 0
+
+        // Current payout month salary (always dynamic — for weekly payouts mid-month)
+        const includeCurrentMonth = payoutRecord.includeCurrentMonth === true;
+        let currentMonthAmount = 0;
+        if (includeCurrentMonth) {
+          if (!currentMonthSettlement) {
+            currentMonthSettlement = Calculations.generateSettlement(
+              { ...state, selectedMonth: payoutMonth },
+              { includeInvoiceTaxEqualization: false, includeInvoiceReconciliation: false }
+            );
+          }
+          const currentEntry = (currentMonthSettlement.employees || []).find(e => e?.person?.id === personId);
+          currentMonthAmount = Math.max(0, parseFloat(currentEntry?.toPayout) || 0);
+        }
+
+        // Base + carryover snapshotted at first payout; currentMonthAmount is always live
+        const snapshotBase = payoutRecord.plannedAmountSnapshot > 0
           ? payoutRecord.plannedAmountSnapshot
           : (baseAmount + (payoutRecord.includeCarryover !== false ? carryoverAmount : 0));
+        const plannedAmount = snapshotBase + currentMonthAmount;
+
         const resolvedBaseAmount = payoutRecord.baseAmountSnapshot > 0 ? payoutRecord.baseAmountSnapshot : baseAmount;
         const resolvedCarryoverAmount = payoutRecord.plannedAmountSnapshot > 0
           ? payoutRecord.carryoverAmountSnapshot
@@ -238,6 +295,8 @@ const Calculations = {
           payoutDate: currentPayoutDate,
           baseAmount: resolvedBaseAmount,
           carryoverAmount: resolvedCarryoverAmount,
+          currentMonthAmount,
+          includeCurrentMonth,
           plannedAmount,
           settledCashAmount: Math.max(0, parseFloat(payoutRecord.settledCashAmount) || 0),
           settledAdvanceAmount: Math.max(0, parseFloat(payoutRecord.settledAdvanceAmount) || 0),
@@ -255,7 +314,7 @@ const Calculations = {
         };
       })
       .filter(Boolean)
-      .filter(item => item.baseAmount > 0 || item.carryoverAmount > 0 || item.remainingAmount > 0 || item.availableAdvanceAmount > 0 || item.allAvailableAdvanceExpenses.length > 0)
+      .filter(item => item.baseAmount > 0 || item.carryoverAmount > 0 || item.currentMonthAmount > 0 || item.remainingAmount > 0 || item.availableAdvanceAmount > 0 || item.allAvailableAdvanceExpenses.length > 0 || (item.payoutRecord?.payouts?.length || 0) > 0)
       .sort((left, right) => Calculations.getPersonDisplayName(left.person).localeCompare(Calculations.getPersonDisplayName(right.person), 'pl-PL'));
 
     return {
