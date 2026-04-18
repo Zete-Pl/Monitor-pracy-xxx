@@ -3,34 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" id="viewport-meta" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <!-- OWASP A05: Security headers -->
-  <meta http-equiv="X-Content-Type-Options" content="nosniff">
-  <meta http-equiv="X-Frame-Options" content="DENY">
-  <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
-  <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=()">
-  <!-- OWASP A05: Content Security Policy -->
-  <meta http-equiv="Content-Security-Policy" content="
-    default-src 'self';
-    script-src 'self' 'unsafe-inline'
-      https://www.gstatic.com
-      https://unpkg.com
-      https://cdn.jsdelivr.net;
-    style-src 'self' 'unsafe-inline';
-    connect-src 'self'
-      https://*.firebaseio.com
-      https://*.firebasedatabase.app
-      wss://*.firebaseio.com
-      wss://*.firebasedatabase.app
-      https://identitytoolkit.googleapis.com
-      https://securetoken.googleapis.com
-      https://wl-api.mf.gov.pl
-      https://r.jina.ai;
-    img-src 'self' data: https:;
-    font-src 'self';
-    frame-ancestors 'none';
-    base-uri 'self';
-    form-action 'self';
-  ">
   <meta name="theme-color" content="#0f111a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1728,17 +1700,12 @@
     </nav>
   </div>
 
-  <!-- OWASP A06: Przypięte do konkretnych wersji. SRI: gstatic.com nie publikuje oficjalnych haszy — rozważ self-hosting Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app-compat.js" crossorigin="anonymous"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-auth-compat.js" crossorigin="anonymous"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-database-compat.js" crossorigin="anonymous"></script>
-  <!-- Lucide: przypięte do wersji zamiast @latest -->
-  <script src="https://unpkg.com/lucide@0.441.0/dist/umd/lucide.min.js" crossorigin="anonymous"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-database-compat.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
   <script>lucide.createIcons();</script>
-  <!-- SRI dla SortableJS: wygeneruj hash komendą: curl -sfL "https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js" | openssl dgst -sha384 -binary | openssl base64 -A -->
-  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js" crossorigin="anonymous"></script>
-  <!-- Firebase config (lokalny plik z kluczami, nie w repozytorium) -->
-  <script src="js/firebase-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
   <!-- Scripts with Cache Busting v3 -->
   <script src="js/migration.js?v=3"></script>
   <script src="js/store.js?v=3"></script>
@@ -1748,7 +1715,9 @@
   <script>
     console.warn("MONITOR PRACY V3 - NETWORK ONLY MODE ACTIVE");
     window.onerror = function(message, source, lineno, colno, error) {
-      console.error('Błąd krytyczny:', message, 'linia:', lineno);
+      const msg = "BŁĄD KRYTYCZNY: " + message + "\nLinia: " + lineno + "\nPlik: " + source;
+      alert(msg);
+      console.error(error);
       return false;
     };
     /* Service Worker Disabled temporarily to fix sticky cache issues
