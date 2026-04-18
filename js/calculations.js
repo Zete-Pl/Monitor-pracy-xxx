@@ -57,8 +57,15 @@ const Calculations = {
   getPayoutSettings: (state, month = null) => {
     const monthSettings = Calculations.getMonthSettings(state, month);
     const payouts = monthSettings?.payouts || {};
+    const separateCompanies = Object.entries(payouts.separateCompanies || {}).reduce((acc, [companyId, config]) => {
+      const normalizedId = (companyId || '').toString().trim();
+      if (!normalizedId) return acc;
+      acc[normalizedId] = { enablePayouts: config?.enablePayouts === true };
+      return acc;
+    }, {});
     return {
       defaultDay: Math.max(1, Math.min(31, parseInt(payouts.defaultDay, 10) || 15)),
+      separateCompanies,
       employees: Object.entries(payouts.employees || {}).reduce((acc, [personId, record]) => {
         const normalizedPersonId = (personId || '').toString().trim();
         if (!normalizedPersonId) return acc;
@@ -148,6 +155,24 @@ const Calculations = {
       }, 0);
   },
 
+  getEmployeeSettledForSourceMonth: (state, sourceMonth = '', personId = '') => {
+    if (!sourceMonth || !personId) return 0;
+    let total = 0;
+    Object.values(state?.months || {}).forEach(monthData => {
+      const empRecord = monthData?.payouts?.employees?.[personId];
+      if (!empRecord || !Array.isArray(empRecord.payouts)) return;
+      empRecord.payouts.forEach(entry => {
+        if (!entry || entry.sourceMonth !== sourceMonth) return;
+        const cash = Math.max(0, parseFloat(entry.cashAmount) || 0);
+        const advances = Array.isArray(entry.deductedAdvances)
+          ? entry.deductedAdvances.filter(a => !a.restoredToCosts).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0)
+          : 0;
+        total += cash + advances;
+      });
+    });
+    return total;
+  },
+
   getEmployeePayoutAdvances: (state, payoutMonth = '', personId = '', cutoffDate = '') => {
     if (!payoutMonth || !personId || !cutoffDate) return { amount: 0, expenses: [] };
     const scopedState = Calculations._wrapState({ ...state, selectedMonth: payoutMonth }, payoutMonth);
@@ -189,8 +214,12 @@ const Calculations = {
     const lastDayOfPayoutMonth = `${payoutMonth}-${String(new Date(pyear, pmonthNum, 0).getDate()).padStart(2, '0')}`;
     const previousMonthSettlement = previousMonth
       ? Calculations.generateSettlement({ ...state, selectedMonth: previousMonth }, { includeInvoiceTaxEqualization: false, includeInvoiceReconciliation: false })
-      : { employees: [] };
-    const previousMonthEmployeeMap = Object.fromEntries((previousMonthSettlement?.employees || []).map(entry => [entry?.person?.id, entry]));
+      : { employees: [], workingPartners: [] };
+    // Include both EMPLOYEE and WORKING_PARTNER from previous month settlement
+    const previousMonthEmployeeMap = Object.fromEntries([
+      ...(previousMonthSettlement?.employees || []).map(entry => [entry?.person?.id, entry]),
+      ...(previousMonthSettlement?.workingPartners || []).map(entry => [entry?.person?.id, entry])
+    ]);
     const currentMonthScopedState = Calculations._wrapState({ ...state, selectedMonth: payoutMonth }, payoutMonth);
     const employeeIds = new Set([
       ...Object.keys(previousMonthEmployeeMap),
@@ -202,16 +231,30 @@ const Calculations = {
 
     // Partners list for the payer selector
     const allPersons = state?.common?.persons || state?.persons || [];
+    const personById = Object.fromEntries(allPersons.map(p => [p.id, p]));
     const partners = allPersons
       .filter(p => (p.type === 'PARTNER' || p.type === 'WORKING_PARTNER') && p.isActive !== false)
       .sort((a, b) => Calculations.getPersonDisplayName(a).localeCompare(Calculations.getPersonDisplayName(b), 'pl-PL'));
+    const payoutSeparateCompanies = payoutSettings.separateCompanies || {};
 
     // Lazily computed current-month settlement (shared across employees)
     let currentMonthSettlement = null;
 
     const employees = [...employeeIds]
       .map(personId => {
-        const person = allPersons.find(candidate => candidate.id === personId && candidate.type === 'EMPLOYEE');
+        // Accept EMPLOYEE (unless from SEPARATE_COMPANY without enablePayouts) and WORKING_PARTNER
+        const person = allPersons.find(candidate => {
+          if (candidate.id !== personId) return false;
+          if (candidate.type === 'WORKING_PARTNER') return true;
+          if (candidate.type === 'EMPLOYEE') {
+            const empEmployerId = candidate.employerId;
+            if (empEmployerId && personById[empEmployerId]?.type === 'SEPARATE_COMPANY') {
+              return payoutSeparateCompanies[empEmployerId]?.enablePayouts === true;
+            }
+            return true;
+          }
+          return false;
+        });
         if (!person) return null;
 
         const payoutRecord = payoutSettings.employees?.[personId] || {
@@ -310,6 +353,7 @@ const Calculations = {
           defaultCheckedAdvanceIds: defaultCheckedIds,
           totalAdvanceAmountToDate: allAdvancesForMonth.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0),
           payoutRecord,
+          defaultPayerId: person.employerId || '',
           payoutNowAmount: Math.max(0, remainingAmount - availableAdvanceAmount)
         };
       })
@@ -328,6 +372,35 @@ const Calculations = {
       totalCarryoverAmount: employees.reduce((sum, item) => sum + item.carryoverAmount, 0),
       totalRemainingAmount: employees.reduce((sum, item) => sum + item.remainingAmount, 0)
     };
+  },
+
+  // Returns cross-partner salary liability data for a given payout month.
+  // paidExternalSalaries[payerId] = amount they paid on behalf of other employers
+  // receivedExternalSalaryPayments[employerId] = amount others paid for their employees
+  getCrossPartnerPayoutLiabilities: (state, payoutMonth = '') => {
+    if (!payoutMonth) return { paidExternalSalaries: {}, receivedExternalSalaryPayments: {} };
+    const allPersons = state?.common?.persons || state?.persons || [];
+    const personById = Object.fromEntries(allPersons.map(p => [p.id, p]));
+    const monthData = state?.months?.[payoutMonth];
+    const payoutsSettings = monthData?.payouts || {};
+    const paidExternalSalaries = {};
+    const receivedExternalSalaryPayments = {};
+
+    Object.entries(payoutsSettings.employees || {}).forEach(([personId, empRecord]) => {
+      if (!empRecord || !Array.isArray(empRecord.payouts)) return;
+      const person = personById[personId];
+      const employerPartnerId = person?.employerId || '';
+      empRecord.payouts.forEach(entry => {
+        if (!entry || !entry.salaryRefund || entry.salaryRefund.amount <= 0.005) return;
+        const payer = entry.paidByPartnerId;
+        const amount = entry.salaryRefund.amount;
+        if (!payer || !employerPartnerId || payer === employerPartnerId) return;
+        paidExternalSalaries[payer] = (paidExternalSalaries[payer] || 0) + amount;
+        receivedExternalSalaryPayments[employerPartnerId] = (receivedExternalSalaryPayments[employerPartnerId] || 0) + amount;
+      });
+    });
+
+    return { paidExternalSalaries, receivedExternalSalaryPayments };
   },
 
   getSettlementConfig: (state, month = null) => {
@@ -2538,6 +2611,17 @@ const Calculations = {
       const employerPaidContractTaxAmount = contractCharges.paidByEmployer ? contractCharges.taxAmount : 0;
       const employerPaidContractZusAmount = contractCharges.paidByEmployer ? contractCharges.zusAmount : 0;
 
+      const rawToPayout = emp.salary + totalBenefitAmount + paidCosts + paidAdvances + refundsReceived - refundsPaid - advancesTaken - deductedContractTaxAmount - deductedContractZusAmount;
+      const alreadySettledThisMonth = Calculations.getEmployeeSettledForSourceMonth(state, selectedMonth, emp.person.id);
+      const payoutsForThisMonth = {
+        entries: Object.values(state?.months || {}).flatMap(md => {
+          const rec = md?.payouts?.employees?.[emp.person.id];
+          if (!rec || !Array.isArray(rec.payouts)) return [];
+          return rec.payouts.filter(e => e && e.sourceMonth === selectedMonth);
+        }),
+        totalSettled: alreadySettledThisMonth,
+        plannedAmount: Math.max(0, rawToPayout)
+      };
       return {
         ...emp,
         employer,
@@ -2557,7 +2641,8 @@ const Calculations = {
         employerPaidContractZusAmount,
         employerPaidContractCharges: employerPaidContractTaxAmount + employerPaidContractZusAmount,
         contractChargesPaidByEmployer: contractCharges.paidByEmployer,
-        toPayout: emp.salary + totalBenefitAmount + paidCosts + paidAdvances + refundsReceived - refundsPaid - advancesTaken - deductedContractTaxAmount - deductedContractZusAmount
+        payoutsForThisMonth,
+        toPayout: Math.max(0, rawToPayout - alreadySettledThisMonth)
       };
     });
 
@@ -2607,6 +2692,16 @@ const Calculations = {
       const taxAmount = ryczaltTaxAmount + deductedContractTaxAmount;
       const zusAmount = deductedContractZusAmount;
 
+      const alreadySettledThisMonthWp = Calculations.getEmployeeSettledForSourceMonth(state, selectedMonth, wp.person.id);
+      const payoutsForThisMonth = {
+        entries: Object.values(state?.months || {}).flatMap(md => {
+          const rec = md?.payouts?.employees?.[wp.person.id];
+          if (!rec || !Array.isArray(rec.payouts)) return [];
+          return rec.payouts.filter(e => e && e.sourceMonth === selectedMonth);
+        }),
+        totalSettled: alreadySettledThisMonthWp,
+        plannedAmount: Math.max(0, grossBeforeAccounting)
+      };
       return {
         ...wp,
         employer,
@@ -2629,7 +2724,8 @@ const Calculations = {
         contractChargesPaidByEmployer: contractCharges.paidByEmployer,
         taxAmount,
         zusAmount,
-        toPayout: grossBeforeAccounting,
+        payoutsForThisMonth,
+        toPayout: Math.max(0, grossBeforeAccounting - alreadySettledThisMonthWp),
         netAfterAccounting: Calculations.calculateNetAfterAccounting(grossBeforeAccounting, taxAmount, zusAmount)
       };
     });
