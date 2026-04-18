@@ -5344,13 +5344,43 @@ details[open] > .payout-history-panel-summary::before { transform: rotate(90deg)
 /* Małe przyciski */
 .btn-xs { padding: 0.2rem 0.55rem !important; font-size: 0.75rem !important; }
 
+/* Delete button */
+.btn-delete-payout { color: var(--danger, #e74c3c) !important; border-color: var(--danger, #e74c3c) !important; margin-left: 0.5rem; flex-shrink: 0; }
+
+/* Source month tag */
+.payout-source-month-tag { font-size: 0.75rem; background: var(--accent-subtle, rgba(99,102,241,0.12)); color: var(--accent, #6366f1); padding: 0.1rem 0.45rem; border-radius: 0.25rem; font-weight: 600; }
+
+/* History entry actions row */
+.payout-history-entry-actions { display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
+
+/* Separate companies section */
+.payout-separate-companies-panel { margin-top: 1rem; border: 1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius: 0.6rem; overflow: hidden; }
+.payout-separate-companies-list { padding: 0.75rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.payout-separate-company-row { font-size: 0.88rem; }
+
+/* Global history */
+.payout-global-history-panel { margin-top: 1rem; border: 1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius: 0.6rem; overflow: hidden; }
+.payout-global-history-wrap { overflow-x: auto; }
+.payout-global-history-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.payout-global-history-table th { background: var(--bg-glass); padding: 0.4rem 0.75rem; text-align: left; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.08)); }
+.payout-global-history-table td { padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.06)); color: var(--text-secondary); }
+.payout-global-history-table tr:last-child td { border-bottom: none; }
+.payout-global-history-table .text-right { text-align: right; }
+
 /* Sekcja wypłat w druku */
 .settlement-payout-section { margin-top: 0.75rem; }
+.settlement-payout-summary-toggle { display: flex; justify-content: space-between; align-items: center; list-style: none; cursor: pointer; padding: 0.4rem 0; font-size: 0.88rem; }
+.settlement-payout-summary-toggle::-webkit-details-marker { display: none; }
 .settlement-payout-summary { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; font-size: 0.82rem; padding: 0.4rem 0; color: var(--text-secondary, #64748b); margin-bottom: 0.25rem; }
 .settlement-payout-summary strong { color: var(--text-primary, #0f172a); }
-.settlement-payout-entry { display: flex; justify-content: space-between; align-items: center; font-size: 0.83rem; padding: 0.2rem 0; color: var(--text-secondary, #64748b); border-bottom: 1px solid rgba(0,0,0,0.06); }
+.settlement-payout-entry { font-size: 0.83rem; padding: 0.25rem 0; color: var(--text-secondary, #64748b); border-bottom: 1px solid rgba(0,0,0,0.06); }
+.settlement-payout-entry--block { padding: 0.35rem 0; }
+.settlement-payout-entry-header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
 .settlement-payout-entry:last-child { border-bottom: none; }
 .settlement-payout-entry strong { color: var(--text-primary, #0f172a); }
+.settlement-payout-advances { padding: 0.25rem 0 0.1rem 0.75rem; }
+.settlement-payout-advance-row { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text-secondary, #64748b); padding: 0.1rem 0; }
+.payout-advance-annotation { font-style: italic; opacity: 0.7; font-size: 0.75rem; }
 
 /* Responsive */
 @media (max-width: 650px) {

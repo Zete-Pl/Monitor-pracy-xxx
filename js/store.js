@@ -205,16 +205,28 @@ const normalizePayoutEntry = (entry = {}) => {
         }))
         .filter(ref => ref.advanceId && ref.toPartnerId)
     : [];
+  const salaryRefund = entry.salaryRefund && typeof entry.salaryRefund === 'object'
+    ? {
+        toPartnerId: (entry.salaryRefund.toPartnerId || '').toString().trim(),
+        amount: Math.max(0, parseFloat(entry.salaryRefund.amount) || 0),
+        returned: entry.salaryRefund.returned === true,
+        returnedAt: (entry.salaryRefund.returnedAt || '').toString().trim()
+      }
+    : null;
+
   return {
     id: (entry.id || generateId()).toString().trim(),
     type: ['monthly', 'weekly', 'custom'].includes(entry.type) ? entry.type : 'monthly',
     label: (entry.label || '').toString().trim(),
+    sourceMonth: /^\d{4}-\d{2}$/.test((entry.sourceMonth || '').toString().trim())
+      ? entry.sourceMonth.toString().trim() : '',
     payoutDate: /^\d{4}-\d{2}-\d{2}$/.test((entry.payoutDate || '').trim())
       ? entry.payoutDate.trim() : '',
     cashAmount: Math.max(0, parseFloat(entry.cashAmount) || 0),
     paidByPartnerId: (entry.paidByPartnerId || '').toString().trim(),
     deductedAdvances,
     advanceRefunds,
+    salaryRefund: salaryRefund?.toPartnerId ? salaryRefund : null,
     createdAt: (entry.createdAt || '').toString().trim()
   };
 };
@@ -290,9 +302,17 @@ const normalizePayoutSettings = (settings = {}) => {
     return acc;
   }, {});
 
+  const separateCompanies = Object.entries(settings.separateCompanies || {}).reduce((acc, [companyId, config]) => {
+    const normalizedId = (companyId || '').toString().trim();
+    if (!normalizedId) return acc;
+    acc[normalizedId] = { enablePayouts: config?.enablePayouts === true };
+    return acc;
+  }, {});
+
   return {
     defaultDay: normalizePayoutDay(settings.defaultDay, 15),
-    employees
+    employees,
+    separateCompanies
   };
 };
 
@@ -3770,7 +3790,11 @@ const Store = {
       !alreadyRemovedIds.has(expense.id)
     );
 
-    const paidByPartnerId = (settlement.paidByPartnerId || '').toString().trim();
+    // Default payer = person's employer if not specified
+    const allPersons = appState.common?.persons || appState.persons || [];
+    const personRecord = allPersons.find(p => p.id === normalizedPersonId);
+    const employerPartnerId = (personRecord?.employerId || '').toString().trim();
+    const paidByPartnerId = (settlement.paidByPartnerId || '').toString().trim() || employerPartnerId;
 
     const deductedAdvances = advancesToDeduct.map(expense => ({
       id: expense.id,
@@ -3782,7 +3806,7 @@ const Store = {
       restoredAt: ''
     }));
 
-    // Refund obligations: if payer is set and differs from the advance giver
+    // Refund obligations: if payer differs from advance giver
     const advanceRefunds = deductedAdvances
       .filter(adv => adv.paidById && paidByPartnerId && adv.paidById !== paidByPartnerId)
       .map(adv => ({
@@ -3801,15 +3825,23 @@ const Store = {
 
     const cashAmount = Math.max(0, parseFloat(settlement.cashAmount) || 0);
 
+    // Cross-partner salary refund: if payer differs from employer, employer owes payer
+    const salaryRefund = (paidByPartnerId && employerPartnerId && paidByPartnerId !== employerPartnerId && cashAmount > 0.005)
+      ? { toPartnerId: paidByPartnerId, amount: cashAmount, returned: false, returnedAt: '' }
+      : null;
+
+    const entryId = generateId();
     const payoutEntry = normalizePayoutEntry({
-      id: generateId(),
+      id: entryId,
       type: settlement.payoutType || 'monthly',
       label: settlement.payoutLabel || '',
+      sourceMonth: (settlement.sourceMonth || '').toString().trim(),
       payoutDate: settlement.payoutDate || '',
       cashAmount,
       paidByPartnerId,
       deductedAdvances,
       advanceRefunds,
+      salaryRefund,
       createdAt: new Date().toISOString()
     });
 
@@ -3907,6 +3939,101 @@ const Store = {
     Store.save(month);
     return true;
   },
+
+  markSalaryRefundReturned: (personId, payoutEntryId, month = Store.getSelectedMonth()) => {
+    const normalizedPersonId = (personId || '').toString().trim();
+    if (!canMutateMonth(month) || !normalizedPersonId) return false;
+
+    const ms = ensureMonthSettings(month);
+    const existingRecord = normalizePayoutEmployeeRecord(ms.payouts?.employees?.[normalizedPersonId] || {});
+
+    const payoutIndex = existingRecord.payouts.findIndex(p => p.id === payoutEntryId);
+    if (payoutIndex === -1) return false;
+    const entry = existingRecord.payouts[payoutIndex];
+    if (!entry.salaryRefund || entry.salaryRefund.returned) return false;
+
+    const updatedPayouts = [...existingRecord.payouts];
+    updatedPayouts[payoutIndex] = {
+      ...entry,
+      salaryRefund: { ...entry.salaryRefund, returned: true, returnedAt: new Date().toISOString() }
+    };
+
+    const updatedRecord = normalizePayoutEmployeeRecord({ ...existingRecord, payouts: updatedPayouts });
+    ms.payouts = normalizePayoutSettings({
+      ...(ms.payouts || {}),
+      employees: { ...(ms.payouts?.employees || {}), [normalizedPersonId]: updatedRecord }
+    });
+    Store.save(month);
+    return true;
+  },
+
+  deletePayoutEntry: (personId, entryId, payoutMonth = Store.getSelectedMonth()) => {
+    const normalizedPersonId = (personId || '').toString().trim();
+    if (!canMutateMonth(payoutMonth) || !normalizedPersonId || !entryId) return false;
+
+    const ms = ensureMonthSettings(payoutMonth);
+    const existingRecord = normalizePayoutEmployeeRecord(ms.payouts?.employees?.[normalizedPersonId] || {});
+    const monthRecord = appState.months[payoutMonth] || (appState.months[payoutMonth] = normalizeMonth(null));
+
+    const entryIndex = existingRecord.payouts.findIndex(p => p.id === entryId);
+    if (entryIndex === -1) return false;
+
+    const entry = existingRecord.payouts[entryIndex];
+
+    // Restore non-restored advances back as ADVANCE expenses
+    entry.deductedAdvances
+      .filter(adv => !adv.restoredToCosts)
+      .forEach(adv => {
+        monthRecord.expenses.push(normalizeExpenseRecord({
+          id: generateId(),
+          type: 'ADVANCE',
+          date: adv.date || `${payoutMonth}-01`,
+          name: adv.name || 'Zaliczka',
+          amount: adv.amount,
+          paidById: adv.paidById,
+          advanceForId: normalizedPersonId
+        }));
+      });
+
+    const updatedPayouts = existingRecord.payouts.filter(p => p.id !== entryId);
+    const updatedRecord = normalizePayoutEmployeeRecord({
+      ...existingRecord,
+      payouts: updatedPayouts,
+      ...(updatedPayouts.length === 0 ? {
+        plannedAmountSnapshot: 0,
+        baseAmountSnapshot: 0,
+        carryoverAmountSnapshot: 0
+      } : {})
+    });
+
+    ms.payouts = normalizePayoutSettings({
+      ...(ms.payouts || {}),
+      employees: { ...(ms.payouts?.employees || {}), [normalizedPersonId]: updatedRecord }
+    });
+    Store.save(payoutMonth);
+    return true;
+  },
+
+  updateSeparateCompanyPayoutsConfig: (companyId, config = {}, month = Store.getSelectedMonth()) => {
+    const normalizedId = (companyId || '').toString().trim();
+    if (!canMutateMonth(month) || !normalizedId) return false;
+
+    const ms = ensureMonthSettings(month);
+    const existingSettings = ms.payouts || {};
+    ms.payouts = normalizePayoutSettings({
+      ...existingSettings,
+      separateCompanies: {
+        ...(existingSettings.separateCompanies || {}),
+        [normalizedId]: {
+          ...(existingSettings.separateCompanies?.[normalizedId] || {}),
+          ...config
+        }
+      }
+    });
+    Store.save(month);
+    return true;
+  },
+
   updateInvoiceMonthConfig: (invoiceConfig = {}, month = Store.getSelectedMonth()) => {
     if (!canMutateMonth(month)) return false;
     const ms = ensureMonthSettings(month);

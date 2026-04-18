@@ -9591,16 +9591,34 @@ function buildSettlementEmployeePayoutsHtml(personId, state, payoutMonth) {
 
     const allPersons = state?.common?.persons || state?.persons || [];
     const entriesHtml = record.payouts.map(p => {
-      const advTotal = p.deductedAdvances.filter(a => !a.restoredToCosts).reduce((s, a) => s + a.amount, 0);
+      const deductedActiveAdvances = Array.isArray(p.deductedAdvances)
+        ? p.deductedAdvances.filter(a => !a.restoredToCosts)
+        : [];
+      const advTotal = deductedActiveAdvances.reduce((s, a) => s + (a.amount || 0), 0);
       const entryTotal = (p.cashAmount || 0) + advTotal;
       const typeLabel = p.type === 'weekly' ? 'Tygodniówka' : p.type === 'custom' ? 'Niestandardowa' : 'Miesięczna';
       const label = p.label || typeLabel;
       const payer = p.paidByPartnerId ? allPersons.find(x => x.id === p.paidByPartnerId) : null;
       const payerName = payer ? getPersonDisplayName(payer) : '';
       const dateStr = p.payoutDate ? ` • ${p.payoutDate.split('-').reverse().join('.')}` : '';
-      return `<div class="settlement-payout-entry">
-        <span>${escapeReportHtml(label)}${escapeReportHtml(dateStr)}${payerName ? ` • ${escapeReportHtml(payerName)}` : ''}</span>
-        <strong>${formatSettlementCurrency(entryTotal)}</strong>
+      const sourceLabel = p.sourceMonth ? ` • za ${formatMonthLabel(p.sourceMonth)}` : '';
+
+      const advancesTableHtml = deductedActiveAdvances.length > 0
+        ? `<div class="settlement-payout-advances">
+            ${deductedActiveAdvances.map(adv => `
+              <div class="settlement-payout-advance-row">
+                <span>${escapeReportHtml(adv.date || '')} ${escapeReportHtml(adv.name || 'Zaliczka')}</span>
+                <span>${formatSettlementCurrency(adv.amount)} <em class="payout-advance-annotation">(odjęte od wypłaty)</em></span>
+              </div>`).join('')}
+          </div>`
+        : '';
+
+      return `<div class="settlement-payout-entry settlement-payout-entry--block">
+        <div class="settlement-payout-entry-header">
+          <span>${escapeReportHtml(label)}${escapeReportHtml(sourceLabel)}${escapeReportHtml(dateStr)}${payerName ? ` • ${escapeReportHtml(payerName)}` : ''}</span>
+          <strong>${formatSettlementCurrency(entryTotal)}</strong>
+        </div>
+        ${advancesTableHtml}
       </div>`;
     }).join('');
 
@@ -9619,12 +9637,14 @@ function buildSettlementEmployeePayoutsHtml(personId, state, payoutMonth) {
 
     return `
       <div class="settlement-detail-item settlement-payout-section">
-        <div class="settlement-detail-item-header">
-          <div><h4>Wypłaty w tym miesiącu</h4></div>
-          <strong>${formatSettlementCurrency(settledAmount)}</strong>
-        </div>
-        ${summaryHtml}
-        <div>${entriesHtml}</div>
+        <details>
+          <summary class="settlement-payout-summary-toggle">
+            <span><strong>Wypłaty w tym miesiącu</strong></span>
+            <strong>${formatSettlementCurrency(settledAmount)}</strong>
+          </summary>
+          ${summaryHtml}
+          <div>${entriesHtml}</div>
+        </details>
       </div>`;
   } catch (e) {
     return '';
@@ -9812,7 +9832,7 @@ function buildSettlementPersonCardHtml(entry, role, state, details) {
           <ul class="settlement-inline-list">${expenseDetails.advancesTaken.length ? expenseDetails.advancesTaken.map(item => `<li>${item.label}: ${formatSettlementCurrency(item.amount)}</li>`).join('') : '<li>Brak pozycji.</li>'}</ul>
         </div>
       </div>
-      ${role === 'employee' ? buildSettlementEmployeePayoutsHtml(entry.person.id, state, details.selectedMonth) : ''}
+      ${(role === 'employee' || role === 'workingPartner') ? buildSettlementEmployeePayoutsHtml(entry.person.id, state, details.selectedMonth) : ''}
     </div>
   `;
 }

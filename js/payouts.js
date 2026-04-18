@@ -78,22 +78,51 @@ function buildPayoutHistoryEntryHtml(entry, personId, partnerMap) {
       }).join('')}
     </div>` : '';
 
+  const sourceMonthLabel = entry.sourceMonth ? `za ${escapeReportHtml(formatMonthLabel(entry.sourceMonth))}` : '';
+  const salaryRefundHtml = entry.salaryRefund?.toPartnerId
+    ? (() => {
+        const refundToName = entry.salaryRefund.toPartnerId ? (partnerMap[entry.salaryRefund.toPartnerId] || entry.salaryRefund.toPartnerId) : '?';
+        if (entry.salaryRefund.returned) {
+          return `<div class="payout-refund-row payout-refund-row--done">
+            <span>✓ Rozliczono z ${escapeReportHtml(refundToName)}: ${escapeReportHtml(formatSettlementCompactCurrency(entry.salaryRefund.amount))}</span>
+          </div>`;
+        }
+        return `<div class="payout-refunds-section">
+          <div class="payout-section-label">Rozliczenie wynagrodzenia między wspólnikami:</div>
+          <div class="payout-refund-row payout-refund-row--pending">
+            <span class="payout-refund-desc">⚠ Należy zwrócić ${escapeReportHtml(formatSettlementCompactCurrency(entry.salaryRefund.amount))} → ${escapeReportHtml(refundToName)}</span>
+            <button type="button" class="btn btn-secondary btn-xs btn-mark-salary-refund-returned"
+              data-person-id="${escapeReportHtml(personId)}"
+              data-entry-id="${escapeReportHtml(entry.id)}">Zwrócono</button>
+          </div>
+        </div>`;
+      })()
+    : '';
+
   return `
     <div class="payout-history-entry" data-entry-id="${escapeReportHtml(entry.id)}">
       <div class="payout-history-entry-header">
         <div class="payout-history-entry-meta">
           <span class="payout-history-entry-label">${escapeReportHtml(entry.label || getPayoutTypeLabel(entry.type))}</span>
+          ${sourceMonthLabel ? `<span class="payout-source-month-tag">${sourceMonthLabel}</span>` : ''}
           ${entry.payoutDate ? `<span class="payout-history-entry-date">${escapeReportHtml(formatPayoutDateLabel(entry.payoutDate))}</span>` : ''}
           ${payerName ? `<span class="payout-history-entry-payer">płacił: ${escapeReportHtml(payerName)}</span>` : ''}
         </div>
-        <div class="payout-history-entry-amounts">
-          ${entry.cashAmount > 0.005 ? `<span>gotówka: <strong>${escapeReportHtml(formatSettlementCompactCurrency(entry.cashAmount))}</strong></span>` : ''}
-          ${advancesTotal > 0.005 ? `<span>zaliczki: <strong>${escapeReportHtml(formatSettlementCompactCurrency(advancesTotal))}</strong></span>` : ''}
-          <span class="payout-history-entry-total">= ${escapeReportHtml(formatSettlementCompactCurrency(entryTotal))}</span>
+        <div class="payout-history-entry-actions">
+          <div class="payout-history-entry-amounts">
+            ${entry.cashAmount > 0.005 ? `<span>gotówka: <strong>${escapeReportHtml(formatSettlementCompactCurrency(entry.cashAmount))}</strong></span>` : ''}
+            ${advancesTotal > 0.005 ? `<span>zaliczki: <strong>${escapeReportHtml(formatSettlementCompactCurrency(advancesTotal))}</strong></span>` : ''}
+            <span class="payout-history-entry-total">= ${escapeReportHtml(formatSettlementCompactCurrency(entryTotal))}</span>
+          </div>
+          <button type="button" class="btn btn-danger btn-xs btn-delete-payout"
+            data-person-id="${escapeReportHtml(personId)}"
+            data-entry-id="${escapeReportHtml(entry.id)}"
+            title="Usuń wypłatę i przywróć zaliczki">✕</button>
         </div>
       </div>
       ${advancesHtml}
       ${refundsHtml}
+      ${salaryRefundHtml}
     </div>`;
 }
 
@@ -132,7 +161,7 @@ function buildPayoutHistoryHtml(payoutRecord, personId, partnerMap) {
   }).join('');
 
   return `
-    <details class="payout-history-panel" open>
+    <details class="payout-history-panel">
       <summary class="payout-history-panel-summary">
         <span>Historia wypłat (${payouts.length})</span>
         <strong>${escapeReportHtml(formatSettlementCompactCurrency(total))}</strong>
@@ -202,9 +231,10 @@ function buildPayoutEmployeeCardHtml(item = {}, data = {}) {
       )
     : '';
 
-  // Partner options for payer select
+  // Partner options for payer select — default = employee's employer
+  const defaultPayerId = item.defaultPayerId || '';
   const partnerOptions = (data.partners || []).map(p =>
-    `<option value="${escapeReportHtml(p.id)}">${escapeReportHtml(getPersonDisplayName(p))}</option>`
+    `<option value="${escapeReportHtml(p.id)}" ${p.id === defaultPayerId ? 'selected' : ''}>${escapeReportHtml(getPersonDisplayName(p))}</option>`
   ).join('');
 
   // Next weekly payout number
@@ -390,6 +420,9 @@ function settlePayoutForEmployee(personId = '') {
   const dateInput = card.querySelector('.payout-date-input');
   const payerSelect = card.querySelector('.payout-payer-select');
 
+  // sourceMonth: current month for weekly (tygodniówki), previous month for standard
+  const sourceMonth = item.includeCurrentMonth ? item.payoutMonth : item.previousMonth;
+
   const success = Store.settleEmployeePayout?.(personId, {
     payoutType,
     payoutLabel,
@@ -397,7 +430,7 @@ function settlePayoutForEmployee(personId = '') {
     paidByPartnerId: payerSelect?.value || '',
     cashAmount,
     advanceExpenseIds,
-    sourceMonth: item.previousMonth,
+    sourceMonth,
     baseAmountSnapshot: item.baseAmount,
     carryoverAmountSnapshot: item.carryoverAmount,
     plannedAmountSnapshot: item.plannedAmount
@@ -498,6 +531,18 @@ function initPayouts() {
       return;
     }
 
+    // Delete payout entry
+    const deleteBtn = event.target.closest('.btn-delete-payout');
+    if (deleteBtn) {
+      const pId = deleteBtn.dataset.personId;
+      const entryId = deleteBtn.dataset.entryId;
+      if (pId && entryId && confirm('Usunąć wypłatę? Odliczone zaliczki zostaną przywrócone do bieżącego miesiąca.')) {
+        const ok = Store.deletePayoutEntry?.(pId, entryId, getSelectedMonthKey());
+        if (!ok) alert('Nie udało się usunąć wypłaty.');
+      }
+      return;
+    }
+
     // Restore advance to costs
     const restoreBtn = event.target.closest('.btn-restore-advance');
     if (restoreBtn) {
@@ -511,7 +556,7 @@ function initPayouts() {
       return;
     }
 
-    // Mark refund as returned
+    // Mark advance refund as returned
     const refundBtn = event.target.closest('.btn-mark-refund-returned');
     if (refundBtn) {
       const pId = refundBtn.dataset.personId;
@@ -519,6 +564,18 @@ function initPayouts() {
       const advId = refundBtn.dataset.advanceId;
       if (pId && entryId && advId) {
         const ok = Store.markAdvanceRefundReturned?.(pId, entryId, advId, getSelectedMonthKey());
+        if (!ok) alert('Nie udało się oznaczyć zwrotu.');
+      }
+      return;
+    }
+
+    // Mark salary refund as returned (cross-partner)
+    const salaryRefundBtn = event.target.closest('.btn-mark-salary-refund-returned');
+    if (salaryRefundBtn) {
+      const pId = salaryRefundBtn.dataset.personId;
+      const entryId = salaryRefundBtn.dataset.entryId;
+      if (pId && entryId) {
+        const ok = Store.markSalaryRefundReturned?.(pId, entryId, getSelectedMonthKey());
         if (!ok) alert('Nie udało się oznaczyć zwrotu.');
       }
       return;
@@ -554,8 +611,138 @@ function renderPayouts() {
     ? data.employees.map(item => buildPayoutEmployeeCardHtml(item, data)).join('')
     : '<p class="settlement-detail-empty">Brak pracowników z pensją, zaległościami lub zaliczkami do rozliczenia w tym miesiącu.</p>';
 
+  // Render separate companies section
+  const sepSection = document.getElementById('payouts-separate-companies-section');
+  if (sepSection) sepSection.innerHTML = buildPayoutSeparateCompaniesSectionHtml(getPayoutsStateBundle(), data.payoutMonth);
+
+  // Render global history
+  const histSection = document.getElementById('payouts-global-history-section');
+  if (histSection) histSection.innerHTML = buildPayoutGlobalHistoryHtml(getPayoutsStateBundle());
+
   normalizeCurrencySuffixSpacing(document.getElementById('payouts-view'));
 
   // Initialize form summaries
   list.querySelectorAll('.payout-employee-card').forEach(card => updatePayoutFormSummary(card));
+
+  // Event delegation for separate companies toggles
+  if (sepSection && !sepSection.dataset.bound) {
+    sepSection.dataset.bound = 'true';
+    sepSection.addEventListener('change', (event) => {
+      if (event.target.classList.contains('payout-separate-company-toggle')) {
+        const companyId = event.target.dataset.companyId;
+        if (companyId) {
+          Store.updateSeparateCompanyPayoutsConfig?.(companyId, { enablePayouts: event.target.checked }, getSelectedMonthKey());
+        }
+      }
+    });
+  }
 }
+
+function buildPayoutSeparateCompaniesSectionHtml(state, payoutMonth) {
+  const allPersons = state?.common?.persons || state?.persons || [];
+  const separateCompanies = allPersons.filter(p => p.type === 'SEPARATE_COMPANY' && p.isActive !== false);
+  if (separateCompanies.length === 0) return '';
+
+  const payoutSettings = Calculations.getPayoutSettings(state, payoutMonth);
+  const rows = separateCompanies.map(company => {
+    const enabled = payoutSettings.separateCompanies?.[company.id]?.enablePayouts === true;
+    const empCount = allPersons.filter(p => p.type === 'EMPLOYEE' && p.employerId === company.id && p.isActive !== false).length;
+    return `
+      <label class="payout-separate-company-row choice-option">
+        <input type="checkbox" class="payout-separate-company-toggle" data-company-id="${escapeReportHtml(company.id)}" ${enabled ? 'checked' : ''}>
+        <span class="choice-option-text">
+          <strong>${escapeReportHtml(getPersonDisplayName(company))}</strong>
+          <span class="payout-card-note">${empCount} pracownik${empCount === 1 ? '' : empCount < 5 ? 'ów' : 'ów'}</span>
+        </span>
+      </label>`;
+  }).join('');
+
+  return `
+    <details class="payout-separate-companies-panel">
+      <summary class="payout-history-panel-summary">
+        <span>Wypłaty dla pracowników osobnych firm</span>
+        <span class="payout-card-note">domyślnie wyłączone</span>
+      </summary>
+      <div class="payout-separate-companies-list">${rows}</div>
+    </details>`;
+}
+
+function buildPayoutGlobalHistoryHtml(state) {
+  const allPersons = state?.common?.persons || state?.persons || [];
+  const personById = Object.fromEntries(allPersons.map(p => [p.id, p]));
+  const partnerMap = {};
+  allPersons.filter(p => p.type === 'PARTNER' || p.type === 'WORKING_PARTNER').forEach(p => {
+    partnerMap[p.id] = getPersonDisplayName(p);
+  });
+
+  // Collect all payout entries from all months
+  const allEntries = [];
+  Object.entries(state?.months || {}).forEach(([payoutMonth, monthData]) => {
+    Object.entries(monthData?.payouts?.employees || {}).forEach(([personId, empRecord]) => {
+      if (!empRecord || !Array.isArray(empRecord.payouts)) return;
+      const person = personById[personId];
+      empRecord.payouts.forEach(entry => {
+        if (!entry) return;
+        const advTotal = Array.isArray(entry.deductedAdvances)
+          ? entry.deductedAdvances.filter(a => !a.restoredToCosts).reduce((s, a) => s + (a.amount || 0), 0)
+          : 0;
+        allEntries.push({
+          personId,
+          person,
+          payoutMonth,
+          entry,
+          total: (entry.cashAmount || 0) + advTotal
+        });
+      });
+    });
+  });
+
+  if (allEntries.length === 0) return '';
+
+  // Sort by payoutDate desc, then createdAt desc
+  allEntries.sort((a, b) => {
+    const d = (b.entry.payoutDate || b.entry.createdAt || '').localeCompare(a.entry.payoutDate || a.entry.createdAt || '');
+    return d !== 0 ? d : (b.entry.createdAt || '').localeCompare(a.entry.createdAt || '');
+  });
+
+  const rowsHtml = allEntries.map(({ person, entry, total }) => {
+    const name = person ? escapeReportHtml(getPersonDisplayName(person)) : '—';
+    const sourceLabel = entry.sourceMonth ? escapeReportHtml(formatMonthLabel(entry.sourceMonth)) : '—';
+    const payoutDateLabel = entry.payoutDate ? escapeReportHtml(formatPayoutDateLabel(entry.payoutDate)) : '—';
+    const typeLabel = escapeReportHtml(entry.label || getPayoutTypeLabel(entry.type));
+    const payerName = entry.paidByPartnerId ? escapeReportHtml(partnerMap[entry.paidByPartnerId] || entry.paidByPartnerId) : '—';
+    const totalFmt = escapeReportHtml(formatSettlementCompactCurrency(total));
+    const advCount = Array.isArray(entry.deductedAdvances) ? entry.deductedAdvances.filter(a => !a.restoredToCosts).length : 0;
+    return `<tr>
+      <td>${name}</td>
+      <td>${sourceLabel}</td>
+      <td>${payoutDateLabel}</td>
+      <td>${typeLabel}</td>
+      <td class="text-right">${totalFmt}</td>
+      <td>${advCount > 0 ? `${advCount} zal.` : '—'}</td>
+      <td>${payerName}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <details class="payout-global-history-panel">
+      <summary class="payout-history-panel-summary">
+        <span>Historia wszystkich wypłat (${allEntries.length})</span>
+      </summary>
+      <div class="payout-global-history-wrap">
+        <table class="payout-global-history-table">
+          <thead>
+            <tr>
+              <th>Pracownik</th>
+              <th>Za miesiąc</th>
+              <th>Data wypłaty</th>
+              <th>Typ</th>
+              <th>Kwota</th>
+              <th>Zaliczki</th>
+              <th>Płatnik</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+    </details>`;
