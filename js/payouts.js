@@ -746,3 +746,4 @@ function buildPayoutGlobalHistoryHtml(state) {
         </table>
       </div>
     </details>`;
+}
